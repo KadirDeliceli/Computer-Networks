@@ -1,20 +1,7 @@
-import random
 import math
 import networkx as nx
 
 from graph_and_metriks.metrics import compute_metrics, total_cost
-
-
-
-
-def normalize_weights(weights):
-    d = weights.get("delay", 0.0)
-    r = weights.get("reliability", 0.0)
-    s = weights.get("resource", 0.0)
-    t = d + r + s
-    if t == 0:
-        return 1/3, 1/3, 1/3
-    return d/t, r/t, s/t
 
 
 def compute_priority_mode(weights):
@@ -30,7 +17,9 @@ def compute_priority_mode(weights):
 
 
 def step_cost(G, u, v, source, destination, demand, weights):
-    w_delay, w_rel, w_res = normalize_weights(weights)
+    w_delay = weights["delay"]
+    w_rel = weights["reliability"]
+    w_res = weights["resource"]
 
     edge = G[u][v]
     node = G.nodes[v]
@@ -49,28 +38,26 @@ def step_cost(G, u, v, source, destination, demand, weights):
     node_rel = max(min(node_rel, 1.0), 0.01)
 
     reliability_cost = -math.log(link_rel) - math.log(node_rel)
-
     resource_cost = 1000.0 / max(bandwidth, 1.0)
 
-    congestion_penalty = 0.0
-    if demand > 0 and bandwidth < demand:
-        congestion_penalty = 3.0 * ((demand - bandwidth) / demand) * 2
+    slide_booster = 1.0
 
-    slide_booster = 3.4
-
-    total = (w_delay* slide_booster) * delay_cost + (w_rel * slide_booster) * reliability_cost + (w_res * slide_booster) * resource_cost + congestion_penalty 
+    total = (w_delay * slide_booster) * delay_cost + (w_rel * slide_booster) * reliability_cost + (w_res * slide_booster) * resource_cost
 
     return total, delay_cost, reliability_cost, resource_cost, bandwidth
 
 
 def Q_Learning_run(G, source, destination, demand, weights):
-    episodes = 2200
+    episodes = 2500
     max_steps = 70
     alpha = 0.12
     gamma = 0.95
+
     epsilon = 1.0
     epsilon_decay = 0.995
     epsilon_min = 0.05
+
+    PRIORITY_PENALTY = 1.0
 
     Q = {}
 
@@ -83,18 +70,31 @@ def Q_Learning_run(G, source, destination, demand, weights):
         Q[s][a] = v
 
     def neighbors(n):
-        return list(G.neighbors(n))
+        acts = []
+        for v in G.neighbors(n):
+            bw = G[n][v]["bandwidth"]
+            if bw <= 0:
+                continue
+            if demand > 0 and bw < demand:
+                continue
+            acts.append(v)
+        return acts
 
     def best_action(s, n):
         acts = neighbors(n)
         if not acts:
             return None
-        return max(acts, key=lambda a: get_q(s, a))
+        qs = [(a, get_q(s, a)) for a in acts]
+        max_q = max(qs, key=lambda x: x[1])[1]
+        best = [a for a, q in qs if q == max_q]
+        return min(best)
 
-    def choose_action(s, n):
-        if random.random() < epsilon:
-            return random.choice(neighbors(n))
-        return best_action(s, n)
+    def explore_action(s, n, episode_idx, step_idx):
+        acts = neighbors(n)
+        if not acts:
+            return None
+        i = (episode_idx + step_idx) % len(acts)
+        return acts[i]
 
     global state, action, reward
 
@@ -104,7 +104,7 @@ def Q_Learning_run(G, source, destination, demand, weights):
     src_rel = max(min(src_rel, 1.0), 0.01)
     source_rel_cost = -math.log(src_rel)
 
-    for _ in range(episodes):
+    for ep in range(episodes):
         current = source
         step = 0
         done = False
@@ -113,10 +113,17 @@ def Q_Learning_run(G, source, destination, demand, weights):
         while not done:
             step += 1
 
-            state_key = (current, priority_mode)
+            state_key = (current, priority_mode, demand)
             state = state_key
 
-            nxt = choose_action(state_key, current)
+            if epsilon > 0.0:
+                if step <= int(max_steps * epsilon):
+                    nxt = explore_action(state_key, current, ep, step)
+                else:
+                    nxt = best_action(state_key, current)
+            else:
+                nxt = best_action(state_key, current)
+
             if nxt is None:
                 break
 
@@ -133,11 +140,11 @@ def Q_Learning_run(G, source, destination, demand, weights):
                 source_rel_added = True
 
             if priority_mode == 0:
-                r -= 3.0 * d_cost
+                r -= PRIORITY_PENALTY * d_cost
             elif priority_mode == 1:
-                r -= 3.0 * r_cost
+                r -= PRIORITY_PENALTY * r_cost
             else:
-                r -= 3.0 * res_cost
+                r -= PRIORITY_PENALTY * res_cost
 
             if bw < demand:
                 r -= 2.0
@@ -152,7 +159,7 @@ def Q_Learning_run(G, source, destination, demand, weights):
 
             reward = r
 
-            next_state = (nxt, priority_mode)
+            next_state = (nxt, priority_mode, demand)
             future = 0.0 if done else max(
                 (get_q(next_state, a) for a in neighbors(nxt)),
                 default=0.0
@@ -171,7 +178,7 @@ def Q_Learning_run(G, source, destination, demand, weights):
     for _ in range(max_steps):
         if current == destination:
             break
-        state_key = (current, priority_mode)
+        state_key = (current, priority_mode, demand)
         nxt = best_action(state_key, current)
         if nxt is None:
             break
