@@ -40,9 +40,11 @@ def step_cost(G, u, v, source, destination, demand, weights):
     reliability_cost = -math.log(link_rel) - math.log(node_rel)
     resource_cost = 1000.0 / max(bandwidth, 1.0)
 
-    slide_booster = 1.0
-
-    total = (w_delay * slide_booster) * delay_cost + (w_rel * slide_booster) * reliability_cost + (w_res * slide_booster) * resource_cost
+    total = (
+        w_delay * delay_cost
+        + w_rel * reliability_cost
+        + w_res * resource_cost
+    )
 
     return total, delay_cost, reliability_cost, resource_cost, bandwidth
 
@@ -96,8 +98,6 @@ def Q_Learning_run(G, source, destination, demand, weights):
         i = (episode_idx + step_idx) % len(acts)
         return acts[i]
 
-    global state, action, reward
-
     priority_mode = compute_priority_mode(weights)
 
     src_rel = float(G.nodes[source]["reliability"])
@@ -112,22 +112,15 @@ def Q_Learning_run(G, source, destination, demand, weights):
 
         while not done:
             step += 1
-
             state_key = (current, priority_mode, demand)
-            state = state_key
 
-            if epsilon > 0.0:
-                if step <= int(max_steps * epsilon):
-                    nxt = explore_action(state_key, current, ep, step)
-                else:
-                    nxt = best_action(state_key, current)
+            if step <= int(max_steps * epsilon):
+                nxt = explore_action(state_key, current, ep, step)
             else:
                 nxt = best_action(state_key, current)
 
             if nxt is None:
                 break
-
-            action = nxt
 
             cost, d_cost, r_cost, res_cost, bw = step_cost(
                 G, current, nxt, source, destination, demand, weights
@@ -150,14 +143,12 @@ def Q_Learning_run(G, source, destination, demand, weights):
                 r -= 2.0
 
             if nxt == destination:
-                r += 1.0 + priority_mode
+                r += 5.0
                 done = True
 
             if step >= max_steps:
                 r -= 5.0
                 done = True
-
-            reward = r
 
             next_state = (nxt, priority_mode, demand)
             future = 0.0 if done else max(
@@ -174,18 +165,32 @@ def Q_Learning_run(G, source, destination, demand, weights):
 
     path = [source]
     current = source
+    visited = set([source])
 
     for _ in range(max_steps):
         if current == destination:
             break
+
         state_key = (current, priority_mode, demand)
         nxt = best_action(state_key, current)
+
         if nxt is None:
             break
+
+        if nxt in visited:
+            break
+
         path.append(nxt)
+        visited.add(nxt)
         current = nxt
 
-    metrics = compute_metrics(G, path)
-    cost = total_cost(metrics, weights)
+    if path[-1] != destination:
+        return None, float("inf")
 
+    metrics = compute_metrics(G, path)
+
+    if metrics is None:
+        return None, float("inf")
+
+    cost = total_cost(metrics, weights)
     return path, cost
