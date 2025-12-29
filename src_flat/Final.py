@@ -1,4 +1,6 @@
 import time
+import threading
+import os
 import tkinter as tk
 from tkinter import ttk, messagebox
 import matplotlib.pyplot as plt
@@ -7,75 +9,88 @@ import networkx as nx
 import pandas as pd
 
 # ==========================================
-# MEVCUT IMPORTLAR 
+# IMPORTLAR (Hata Yönetimi ile)
 # ==========================================
 try:
     from genetik_ga import run_genetic_algorithm
     from graph_utils import create_random_graph
     from metrics import compute_metrics
     from Qlearning import Q_Learning_run
-except ImportError:
-    # Bu blok sadece kodu test ederken import hatası almamak içindir.
+except ImportError as e:
+    print(f"Kritik Import Hatası: {e}")
+    # Kodun çökmemesi için dummy fonksiyonlar (gerekirse)
     pass
 
 
 class QoSRoutingApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("QoS Tabanlı Çok Amaçlı Rotalama (Responsive UI)")
+        self.root.title("QoS Tabanlı Çok Amaçlı Rotalama (Responsive UI - Threaded)")
 
-        # Pencere açıldığında tam ekran yap (Windows için 'zoomed', Linux/Mac için farklı olabilir)
+        # Pencere açıldığında tam ekran yap veya maksimize et
         try:
             self.root.state('zoomed')
         except:
             w, h = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
             self.root.geometry(f"{w}x{h}")
 
-        self.root.minsize(1000, 700)  # Minimum boyut kısıtlaması
+        self.root.minsize(1000, 700)
 
         # ==========================================
-        # 1. APPLE DESIGN SYSTEM CONFIGURATION
+        # 1. TASARIM AYARLARI
         # ==========================================
-       
         self.font_scale = 1.1
-
         self.colors = {
             "bg_main": "#F2F2F7",  # System Gray 6
             "bg_card": "#FFFFFF",  # Pure White
             "accent": "#007AFF",  # System Blue
-            "accent_hover": "#005BB5",  # Darker Blue
-            "text_main": "#1C1C1E",  # Label Color
-            "text_secondary": "#8E8E93",  # Secondary Label
-            "success": "#34C759",  # System Green
-            "error": "#FF3B30",  # System Red
-            "border": "#D1D1D6",  # Light Border
+            "accent_hover": "#005BB5",
+            "text_main": "#1C1C1E",
+            "text_secondary": "#8E8E93",
+            "success": "#34C759",
+            "error": "#FF3B30",
+            "border": "#D1D1D6",
             "graph_node": "#800080",
             "graph_edge": "#A52A2A"
         }
-
         self.root.configure(bg=self.colors["bg_main"])
 
         # ==========================================
-        # 2. DATA LOADING
+        # 2. VERİ YÜKLEME (DOSYA YOLU GÜVENLİĞİ)
         # ==========================================
+        # Kodun çalıştığı klasörü baz alarak data klasörünü bulur
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        data_dir = os.path.join(base_dir, "..", "data")
+
+        self.edge_file = os.path.join(data_dir, "BSM307_317_Guz2025_TermProject_EdgeData.csv")
+        self.node_file = os.path.join(data_dir, "BSM307_317_Guz2025_TermProject_NodeData.csv")
+        self.demand_file = os.path.join(data_dir, "BSM307_317_Guz2025_TermProject_DemandData.csv")
+
         try:
             self.G = create_random_graph(
                 250, 0.03,
-                edge_file="../data/BSM307_317_Guz2025_TermProject_EdgeData.csv",
-                demand_file="../data/BSM307_317_Guz2025_TermProject_DemandData.csv",
-                node_file="../data/BSM307_317_Guz2025_TermProject_NodeData.csv"
+                edge_file=self.edge_file,
+                demand_file=self.demand_file,
+                node_file=self.node_file
             )
-        except:
-            # Dosyalar yoksa test için boş grafik oluştur
+        except Exception as e:
+            print(f"Veri yükleme hatası (Test moduna geçiliyor): {e}")
             self.G = nx.erdos_renyi_graph(50, 0.1)
             for u, v in self.G.edges():
                 self.G[u][v]['weight'] = 1
+                self.G[u][v]['bandwidth'] = 1000
+                self.G[u][v]['delay'] = 5
+                self.G[u][v]['reliability'] = 0.99
+            for n in self.G.nodes():
+                self.G.nodes[n]['processing_delay'] = 1
+                self.G.nodes[n]['reliability'] = 0.99
 
         self.pos = nx.spring_layout(self.G, seed=42)
         self.current_path = None
+        self.press = None
 
         # ==========================================
-        # 3. VARIABLES
+        # 3. DEĞİŞKENLER
         # ==========================================
         self.var_node_size = tk.DoubleVar(value=60)
         self.var_edge_width = tk.DoubleVar(value=0.5)
@@ -87,29 +102,21 @@ class QoSRoutingApp:
         self.dem = tk.DoubleVar(value=950)
         self.algorithm_var = tk.StringVar(value="Genetic Algorithm")
 
-        self.press = None
-
         # ==========================================
-        # 4. BUILD UI (RESPONSIVE STRUCTURE)
+        # 4. ARAYÜZ İNŞASI
         # ==========================================
         self.build_responsive_layout()
         self.draw_graph()
 
     def build_responsive_layout(self):
-        """
-        Responsive yapı için PanedWindow ve Scrollable Frame kullanır.
-        """
-        # Ana Taşıyıcı: PanedWindow (Kullanıcı fare ile sağa sola çekebilir)
         self.paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL,
                                     bg=self.colors["bg_main"], sashwidth=4, sashrelief=tk.RAISED)
         self.paned.pack(fill=tk.BOTH, expand=True)
 
-        # ---------------- LEFT PANEL (SCROLLABLE) ----------------
-        # Sol tarafın içeriği çok olduğu için scroll bar ekliyoruz.
+        # --- SOL PANEL (Scrollable) ---
         self.left_container = tk.Frame(self.paned, bg=self.colors["bg_card"], width=400)
-        self.paned.add(self.left_container, minsize=300)  # Minimum 300px genişlik
+        self.paned.add(self.left_container, minsize=300)
 
-        # Canvas ve Scrollbar kurulumu
         self.canvas_scroll = tk.Canvas(self.left_container, bg=self.colors["bg_card"], highlightthickness=0)
         self.scrollbar = ttk.Scrollbar(self.left_container, orient="vertical", command=self.canvas_scroll.yview)
         self.scrollable_frame = tk.Frame(self.canvas_scroll, bg=self.colors["bg_card"], padx=20, pady=20)
@@ -119,33 +126,25 @@ class QoSRoutingApp:
             lambda e: self.canvas_scroll.configure(scrollregion=self.canvas_scroll.bbox("all"))
         )
 
-        # Canvas içine pencere oluştur
         self.canvas_frame_window = self.canvas_scroll.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
-
-        # Canvas genişliği değişince içindeki frame'in de genişliğini güncelle (Responsive Width)
         self.canvas_scroll.bind("<Configure>", self._on_canvas_configure)
-
         self.canvas_scroll.configure(yscrollcommand=self.scrollbar.set)
 
-        # Yerleşim
         self.canvas_scroll.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Mouse Wheel Scroll Desteği
         self.bind_mouse_scroll(self.canvas_scroll)
         self.bind_mouse_scroll(self.scrollable_frame)
 
-        # İÇERİĞİ DOLDUR
         self.populate_left_panel(self.scrollable_frame)
 
-        # ---------------- RIGHT PANEL (GRAPH & CARDS) ----------------
+        # --- SAĞ PANEL (Grafik & Kartlar) ---
         self.right_container = tk.Frame(self.paned, bg=self.colors["bg_main"], padx=10, pady=10)
         self.paned.add(self.right_container, minsize=500)
 
-        # Kartlar (Grid sistemi ile responsive)
+        # Kartlar
         cards_frame = tk.Frame(self.right_container, bg=self.colors["bg_main"])
         cards_frame.pack(fill=tk.X, pady=(0, 10))
-        # 3 eşit kolon
         cards_frame.columnconfigure(0, weight=1)
         cards_frame.columnconfigure(1, weight=1)
         cards_frame.columnconfigure(2, weight=1)
@@ -158,8 +157,7 @@ class QoSRoutingApp:
         graph_container = tk.Frame(self.right_container, bg="white", bd=0, highlightthickness=0)
         graph_container.pack(expand=True, fill=tk.BOTH)
 
-        self.fig, self.ax = plt.subplots(figsize=(5, 4),
-                                         facecolor="white")  # figsize başlangıç değeri, sonra resize olacak
+        self.fig, self.ax = plt.subplots(figsize=(5, 4), facecolor="white")
         self.canvas = FigureCanvasTkAgg(self.fig, master=graph_container)
         self.canvas.get_tk_widget().pack(expand=True, fill=tk.BOTH)
 
@@ -169,36 +167,28 @@ class QoSRoutingApp:
         self.canvas.mpl_connect("motion_notify_event", self.on_drag)
 
     def _on_canvas_configure(self, event):
-        """Sol panelin genişliği değiştiğinde içindeki içeriği de genişletir."""
         self.canvas_scroll.itemconfig(self.canvas_frame_window, width=event.width)
 
     def bind_mouse_scroll(self, widget):
-        """Windows ve Linux/Mac için mouse wheel bind eder."""
-        widget.bind_all("<MouseWheel>", self._on_mousewheel)  # Windows
-        widget.bind_all("<Button-4>", self._on_mousewheel)  # Linux
-        widget.bind_all("<Button-5>", self._on_mousewheel)  # Linux
+        widget.bind_all("<MouseWheel>", self._on_mousewheel)
+        widget.bind_all("<Button-4>", self._on_mousewheel)
+        widget.bind_all("<Button-5>", self._on_mousewheel)
 
     def _on_mousewheel(self, event):
-        # Sadece mouse sol panel üzerindeyse kaydır
         x, y = self.root.winfo_pointerxy()
-        widget_under_mouse = self.root.winfo_containing(x, y)
-
-        # Eğer mouse sol panelin içindeyse veya alt widgetlarındaysa
-        if str(widget_under_mouse).startswith(str(self.left_container)):
+        widget = self.root.winfo_containing(x, y)
+        if str(widget).startswith(str(self.left_container)):
             if event.num == 5 or event.delta == -120:
                 self.canvas_scroll.yview_scroll(1, "units")
             elif event.num == 4 or event.delta == 120:
                 self.canvas_scroll.yview_scroll(-1, "units")
 
-    # ================= UI BUILDER (LEFT PANEL CONTENT) =================
+    # ================= UI İÇERİK =================
     def populate_left_panel(self, parent):
-        # Title
         tk.Label(parent, text="QoS Routing",
                  font=("SF Pro Display", int(24 * self.font_scale), "bold"),
-                 bg=self.colors["bg_card"],
-                 fg=self.colors["text_main"]).pack(anchor="w", pady=(0, 20))
+                 bg=self.colors["bg_card"], fg=self.colors["text_main"]).pack(anchor="w", pady=(0, 20))
 
-        # --- PARAMETRELER ---
         self._create_section_label(parent, "PARAMETRELER")
         self._rounded_input(parent, "Kaynak Düğüm (S)", self.src)
         self._rounded_input(parent, "Hedef Düğüm (D)", self.dst)
@@ -206,7 +196,6 @@ class QoSRoutingApp:
 
         self._separator(parent)
 
-        # --- OPTİMİZASYON AĞIRLIKLARI ---
         self._create_section_label(parent, "OPTİMİZASYON AĞIRLIKLARI")
         self.w1 = self._rounded_slider(parent, "Gecikme", 0.4)
         self.w2 = self._rounded_slider(parent, "Güvenilirlik", 0.3)
@@ -214,44 +203,179 @@ class QoSRoutingApp:
 
         self._separator(parent)
 
-        # --- GÖRSEL AYARLAR ---
         self._create_section_label(parent, "GÖRSEL AYARLAR")
-        self._rounded_slider(parent, "Node Boyutu", 60, min_val=0, max_val=100,
+        self._rounded_slider(parent, "Node Boyutu", 60, min_val=10, max_val=200,
                              variable=self.var_node_size, command=self.draw_graph)
-
         self._rounded_slider(parent, "Kenar Kalınlığı", 0.5, min_val=0.1, max_val=5.0,
                              variable=self.var_edge_width, command=self.draw_graph)
-
         self._rounded_slider(parent, "Kenar Saydamlığı", 0.6, min_val=0.0, max_val=1.0,
                              variable=self.var_edge_alpha, command=self.draw_graph)
 
-        chk = tk.Checkbutton(parent, text="Tüm Kenarları Göster", variable=self.var_show_edges,
-                             bg=self.colors["bg_card"], activebackground=self.colors["bg_card"],
-                             font=("Segoe UI", int(10 * self.font_scale)),
-                             command=self.draw_graph)
-        chk.pack(anchor="w", pady=5)
+        tk.Checkbutton(parent, text="Tüm Kenarları Göster", variable=self.var_show_edges,
+                       bg=self.colors["bg_card"], command=self.draw_graph).pack(anchor="w", pady=5)
 
         self._separator(parent)
 
-        # --- ALGORİTMA ---
         self._create_section_label(parent, "ALGORİTMA")
-        style = ttk.Style()
-        style.configure("Rounded.TCombobox", padding=5, relief="flat")
-        combo = ttk.Combobox(parent, textvariable=self.algorithm_var,
-                             values=["Genetic Algorithm", "Q-Learning"], state="readonly",
-                             font=("Segoe UI", int(11 * self.font_scale)))
-        combo.pack(fill=tk.X, pady=(0, 15))
+        ttk.Combobox(parent, textvariable=self.algorithm_var,
+                     values=["Genetic Algorithm", "Q-Learning"], state="readonly").pack(fill=tk.X, pady=(0, 15))
 
-        self._rounded_button(parent, "ALGORİTMAYI ÇALIŞTIR", self.run_selected_algorithm)
+        # BUTON
+        self.btn_run_canvas = self._rounded_button(parent, "ALGORİTMAYI ÇALIŞTIR", self.run_selected_algorithm)
 
         tk.Label(parent, text="Sonuç Detayı", bg=self.colors["bg_card"],
                  font=("Segoe UI", int(10 * self.font_scale), "bold"),
                  fg=self.colors["text_secondary"]).pack(anchor="w", pady=(15, 5))
 
-        # Sonuç kutusunun yüksekliğini biraz azalttık responsive uyum için
         self.result_text_widget = self._rounded_text_area(parent, height=150)
 
-    # ================= ZOOM & PAN =================
+    # ================= LOGIC & THREADING =================
+
+    def get_weights(self):
+        s = self.w1.get() + self.w2.get() + self.w3.get()
+        if s == 0: return None
+        return {"delay": self.w1.get() / s, "reliability": self.w2.get() / s, "resource": self.w3.get() / s}
+
+    def get_demand_mbps(self, src, dst):
+        try:
+            df = pd.read_csv(self.demand_file, sep=';', decimal=',')
+            df.columns = df.columns.str.strip()
+            res = df[(df["src"] == src) & (df["dst"] == dst)]
+            return res.iloc[0]["demand_mbps"] if not res.empty else None
+        except:
+            return None
+
+    def toggle_ui_state(self, is_running):
+        """Çalışma durumuna göre UI'ı kilitler/açar"""
+        if is_running:
+            self.root.config(cursor="watch")
+            self.result_text_widget.delete("1.0", tk.END)
+            self.result_text_widget.insert(tk.END,
+                                           "► Algoritma başlatılıyor...\n► Lütfen bekleyiniz, işlem devam ediyor.\n")
+            # Butonu pasif hale getirmek isterseniz buraya ekleyebilirsiniz
+        else:
+            self.root.config(cursor="")
+
+    def run_selected_algorithm(self):
+        """Ana iş parçacığını (UI) dondurmadan algoritmayı başlatır."""
+        s, d = self.src.get(), self.dst.get()
+
+        # 1. Kontroller
+        if s not in self.G or d not in self.G:
+            messagebox.showerror("Hata", f"Geçersiz Düğüm: {s} veya {d} grafikte bulunamadı.")
+            return
+
+        talep = self.get_demand_mbps(s, d) or self.dem.get()
+        weights = self.get_weights()
+        if not weights:
+            messagebox.showwarning("Uyarı", "Ağırlıklar toplamı 0 olamaz.")
+            return
+
+        algo = self.algorithm_var.get()
+
+        # 2. UI Durumu Güncelle
+        self.toggle_ui_state(True)
+
+        # 3. Worker Thread Tanımla
+        def worker_thread():
+            try:
+                start_time = time.perf_counter()
+                path = None
+                cost = 0
+
+                if algo == "Genetic Algorithm":
+                    path, cost = run_genetic_algorithm(self.G, s, d, talep, weights)
+                elif algo == "Q-Learning":
+                    path, cost = Q_Learning_run(self.G, s, d, talep, weights)
+
+                elapsed = time.perf_counter() - start_time
+
+                # İşlem bitince Ana Thread'e haber ver
+                self.root.after(0, lambda: self.on_algorithm_complete(path, cost, elapsed, algo))
+
+            except Exception as e:
+                self.root.after(0, lambda: self.on_algorithm_error(str(e)))
+
+        # 4. Thread Başlat
+        t = threading.Thread(target=worker_thread, daemon=True)
+        t.start()
+
+    def on_algorithm_complete(self, path, cost, elapsed, algo):
+        """Algoritma bittiğinde ana thread tarafından çağrılır."""
+        self.toggle_ui_state(False)
+        self.current_path = path
+
+        if not path:
+            messagebox.showinfo("Sonuç", "Kısıtları sağlayan uygun bir yol bulunamadı.")
+            self.result_text_widget.insert(tk.END, "► Sonuç: BAŞARISIZ (Yol Yok)\n")
+            return
+
+        # Metrikleri hesapla
+        try:
+            m = compute_metrics(self.G, path)
+            td = m["total_delay"]
+            tr = m["total_reliability"]
+            rc = m["resource_cost"]
+        except:
+            td, tr, rc = 0, 0, 0
+
+        # Kartları Güncelle
+        self.card_delay.config(text=f"{td:.2f} ms")
+        self.card_rel.config(text=f"%{tr * 100:.1f}")
+        self.card_res.config(text=f"{rc:.1f}")
+
+        # Text Alanını Güncelle
+        self.result_text_widget.insert(tk.END, f"► Durum:   TAMAMLANDI\n")
+        self.result_text_widget.insert(tk.END, f"► Yöntem:  {algo}\n")
+        self.result_text_widget.insert(tk.END, f"► Süre:    {elapsed:.4f} sn\n")
+        self.result_text_widget.insert(tk.END, f"► Fitness: {cost:.4f}\n")
+        self.result_text_widget.insert(tk.END, f"► Uzunluk: {len(path)} node\n")
+        self.result_text_widget.insert(tk.END, f"► Rota:    {path}\n")
+
+        # Grafiği Güncelle
+        self.ax.set_title(f"{algo} | Süre: {elapsed:.3f} sn | Fit: {cost:.2f}")
+        self.draw_graph()
+
+    def on_algorithm_error(self, error_msg):
+        self.toggle_ui_state(False)
+        messagebox.showerror("Algoritma Hatası", f"Beklenmeyen bir hata oluştu:\n{error_msg}")
+
+    # ================= GRAFİK ÇİZİMİ =================
+    def draw_graph(self):
+        self.ax.clear()
+        try:
+            # Node Çizimi
+            nx.draw_networkx_nodes(self.G, self.pos, ax=self.ax,
+                                   node_size=self.var_node_size.get(),
+                                   node_color=self.colors["graph_node"],
+                                   edgecolors=self.colors["graph_edge"])
+            # Edge Çizimi
+            if self.var_show_edges.get():
+                nx.draw_networkx_edges(self.G, self.pos, ax=self.ax,
+                                       width=self.var_edge_width.get(),
+                                       alpha=self.var_edge_alpha.get(),
+                                       edge_color=self.colors["graph_edge"])
+            # Yol Varsa Çizimi
+            if self.current_path:
+                # Başlangıç ve Bitiş Node'larını vurgula
+                nx.draw_networkx_nodes(self.G, self.pos,
+                                       nodelist=[self.current_path[0], self.current_path[-1]],
+                                       node_size=self.var_node_size.get() * 1.5,
+                                       node_color=self.colors["accent"],
+                                       ax=self.ax)
+                # Yolu çiz
+                edges_in_path = list(zip(self.current_path, self.current_path[1:]))
+                nx.draw_networkx_edges(self.G, self.pos, edgelist=edges_in_path,
+                                       edge_color=self.colors["accent"],
+                                       width=self.var_edge_width.get() * 3,
+                                       ax=self.ax)
+        except Exception as e:
+            print(f"Çizim hatası: {e}")
+
+        self.ax.axis("off")
+        self.canvas.draw()
+
+    # ================= MATPLOTLIB ETKİLEŞİM =================
     def on_zoom(self, event):
         if event.inaxes != self.ax: return
         base_scale = 1.2
@@ -289,12 +413,12 @@ class QoSRoutingApp:
         self.press = None
         self.canvas.draw_idle()
 
-    # ================= CUSTOM ROUNDED WIDGETS =================
+    # ================= ÖZEL WIDGET'LAR =================
     def _round_rectangle(self, canvas, x1, y1, x2, y2, radius=25, **kwargs):
         points = [x1 + radius, y1, x1 + radius, y1, x2 - radius, y1, x2 - radius, y1,
                   x2, y1, x2, y1 + radius, x2, y1 + radius, x2, y2 - radius, x2, y2 - radius,
                   x2, y2, x2 - radius, y2, x2 - radius, y2, x1 + radius, y2, x1 + radius, y2,
-                  x1, y2, x1, y2 - radius, x1, y2 - radius, x1, y1 + radius, x1, y1 + radius, x1, y1]
+                  x1, y2, x1, y2 - radius, x1, y2 - radius, x1, y1 + radius, x1, y1]
         return canvas.create_polygon(points, **kwargs, smooth=True)
 
     def _rounded_input(self, parent, label_text, variable):
@@ -331,6 +455,7 @@ class QoSRoutingApp:
 
         canvas.bind("<Configure>", draw)
         canvas.bind("<Button-1>", lambda e: command())
+        return canvas
 
     def _rounded_text_area(self, parent, height=100):
         canvas = tk.Canvas(parent, height=height, bg=self.colors["bg_card"], bd=0, highlightthickness=0)
@@ -345,7 +470,7 @@ class QoSRoutingApp:
 
         canvas.bind("<Configure>", draw)
         text_widget = tk.Text(canvas, bg=self.colors["bg_main"], bd=0, highlightthickness=0,
-                              font=("Consolas", int(12 * self.font_scale) , "bold"), wrap=tk.WORD)
+                              font=("Consolas", int(10 * self.font_scale)), wrap=tk.WORD)
         text_widget.place(relx=0.03, rely=0.05, relwidth=0.94, relheight=0.9)
         return text_widget
 
@@ -398,11 +523,9 @@ class QoSRoutingApp:
                  font=("Segoe UI", int(9 * self.font_scale), "bold")).pack(anchor="w", pady=(5, 5))
 
     def _create_card(self, parent, col, title, value, color_code):
-        # Grid layout içinde kullanmak için güncellendi
         card = tk.Frame(parent, bg=self.colors["bg_card"],
                         padx=int(10 * self.font_scale), pady=int(10 * self.font_scale))
         card.config(highlightbackground="#E5E5EA", highlightthickness=1)
-        # Grid kullanarak konumlandırma
         card.grid(row=0, column=col, padx=5, sticky="ew")
 
         tk.Label(card, text=title, bg=self.colors["bg_card"], fg=self.colors["text_secondary"],
@@ -411,87 +534,6 @@ class QoSRoutingApp:
                        font=("Segoe UI", int(20 * self.font_scale), "bold"))
         lbl.pack(pady=(5, 0))
         return lbl
-
-    # ================= LOGIC & RUNNER =================
-    def get_weights(self):
-        s = self.w1.get() + self.w2.get() + self.w3.get()
-        if s == 0: return None
-        return {"delay": self.w1.get() / s, "reliability": self.w2.get() / s, "resource": self.w3.get() / s}
-
-    def get_demand_mbps(self, src, dst):
-        try:
-            df = pd.read_csv("../data/BSM307_317_Guz2025_TermProject_DemandData.csv", sep=';', decimal=',')
-            df.columns = df.columns.str.strip()
-            res = df[(df["src"] == src) & (df["dst"] == dst)]
-            return res.iloc[0]["demand_mbps"] if not res.empty else None
-        except:
-            return None
-
-    def run_selected_algorithm(self):
-        s, d = self.src.get(), self.dst.get()
-        if s not in self.G or d not in self.G:
-            messagebox.showerror("Hata", "Geçersiz Düğüm")
-            return
-
-        talep = self.get_demand_mbps(s, d) or self.dem.get()
-        weights = self.get_weights()
-        if not weights: return
-
-        algo = self.algorithm_var.get()
-        start = time.perf_counter()
-
-        try:
-            if algo == "Genetic Algorithm":
-                path, cost = run_genetic_algorithm(self.G, s, d, talep, weights)
-            elif algo == "Q-Learning":
-                path, cost = Q_Learning_run(self.G, s, d, talep, weights)
-            else:
-                messagebox.showerror("Hata", "Algoritma Seçilmedi")
-                return
-        except Exception as e:
-            messagebox.showerror("Hata", f"Algoritma hatası: {str(e)}")
-            return
-
-        elapsed = time.perf_counter() - start
-        self.current_path = path
-
-        try:
-            m = compute_metrics(self.G, path) if path else None
-            td, tr, rc = (m["total_delay"], m["total_reliability"], m["resource_cost"]) if m else (0, 0, 0)
-        except:
-            td, tr, rc = 0, 0, 0
-
-        self.card_delay.config(text=f"{td:.2f} ms")
-        self.card_rel.config(text=f"%{tr * 100:.1f}")
-        self.card_res.config(text=f"{rc:.1f}")
-
-        self.result_text_widget.delete("1.0", tk.END)
-        self.result_text_widget.insert(tk.END, f"► Algoritma: {algo}\n")
-        self.result_text_widget.insert(tk.END, f"► Süre:      {elapsed:.4f} sn\n")
-        self.result_text_widget.insert(tk.END, f"► Fitness:   {cost:.4f}\n")
-        self.result_text_widget.insert(tk.END, f"► Yol:       {path}\n")
-
-        self.ax.set_title(f"{algo} | Süre: {elapsed:.3f} sn")
-        self.draw_graph()
-
-    def draw_graph(self):
-        self.ax.clear()
-        try:
-            nx.draw_networkx_nodes(self.G, self.pos, ax=self.ax, node_size=self.var_node_size.get(),
-                                   node_color=self.colors["graph_node"], edgecolors=self.colors["graph_edge"])
-            if self.var_show_edges.get():
-                nx.draw_networkx_edges(self.G, self.pos, ax=self.ax, width=self.var_edge_width.get(),
-                                       alpha=self.var_edge_alpha.get(), edge_color=self.colors["graph_edge"])
-            if self.current_path:
-                nx.draw_networkx_nodes(self.G, self.pos, nodelist=[self.current_path[0], self.current_path[-1]],
-                                       node_size=self.var_node_size.get() * 1.5, node_color=self.colors["accent"],
-                                       ax=self.ax)
-                nx.draw_networkx_edges(self.G, self.pos, edgelist=list(zip(self.current_path, self.current_path[1:])),
-                                       edge_color=self.colors["accent"], width=2.5, ax=self.ax)
-        except:
-            pass
-        self.ax.axis("off")
-        self.canvas.draw()
 
 
 if __name__ == "__main__":
