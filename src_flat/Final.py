@@ -25,7 +25,7 @@ except ImportError as e:
 class QoSRoutingApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("QoS Tabanlı Çok Amaçlı Rotalama (Responsive UI - Threaded)")
+        self.root.title("QoS Tabanlı Çok Amaçlı Rotalama")
 
         # Pencere açıldığında tam ekran yap veya maksimize et
         try:
