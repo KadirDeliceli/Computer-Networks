@@ -2,7 +2,6 @@ import math
 import networkx as nx
 from collections import defaultdict
 from metrics import compute_metrics , total_cost
-from graph_and_metriks.metrics import compute_metrics, total_cost
 
 
 def compute_priority_mode(weights):
