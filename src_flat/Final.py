@@ -102,6 +102,10 @@ class QoSRoutingApp:
         self.dem = tk.DoubleVar(value=950)
         self.algorithm_var = tk.StringVar(value="Genetic Algorithm")
 
+        # pop_size ve generations 'ı arayüzden alabilmek için ekledik
+        self.pop = tk.IntVar(value=50)
+        self.gen = tk.IntVar(value=100)
+
         # ==========================================
         # 4. ARAYÜZ İNŞASI
         # ==========================================
@@ -216,6 +220,12 @@ class QoSRoutingApp:
 
         self._separator(parent)
 
+        self._create_section_label(parent, "Genetik Parametreleri")
+        self._rounded_input(parent, "Popülasyon Boyutu", self.pop)
+        self._rounded_input(parent, "generations", self.gen)
+
+        self._separator(parent)
+
         self._create_section_label(parent, "ALGORİTMA")
         ttk.Combobox(parent, textvariable=self.algorithm_var,
                      values=["Genetic Algorithm", "Q-Learning"], state="readonly").pack(fill=tk.X, pady=(0, 15))
@@ -271,6 +281,25 @@ class QoSRoutingApp:
             messagebox.showwarning("Uyarı", "Ağırlıklar toplamı 0 olamaz.")
             return
 
+        print(f"Talep: {talep}" , "\n" , f"Ağırlıklar : {weights}")
+
+        #pop_size , generations arayüzden almak için
+        pop_s = 50
+        gen_s = 100
+        try:
+            pop_val = int(self.pop.get())
+            if pop_val > 0:
+                pop_s = pop_val
+        except:
+            pass
+
+        try:
+            gen_val = int(self.gen.get())
+            if gen_val > 0:
+                gen_s = gen_val
+        except:
+            pass
+
         algo = self.algorithm_var.get()
 
         # 2. UI Durumu Güncelle
@@ -284,7 +313,7 @@ class QoSRoutingApp:
                 cost = 0
 
                 if algo == "Genetic Algorithm":
-                    path, cost = run_genetic_algorithm(self.G, s, d, talep, weights)
+                    path, cost = run_genetic_algorithm(self.G, s, d, talep, weights, pop_s, gen_s)
                 elif algo == "Q-Learning":
                     path, cost = Q_Learning_run(self.G, s, d, talep, weights)
 
