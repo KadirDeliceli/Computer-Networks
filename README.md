@@ -40,7 +40,12 @@ python main.py
 Kullanım:
 
 1.Kaynak (S) ve hedef (D) düğümlerini seçiniz
+
 2.Talep miktarını giriniz
+
 3.Algoritma ağırlıklarını belirleyiniz
+
 4.Algoritmayı çalıştırınız
+
 5.Sonuçları arayüz üzerinden inceleyiniz
+
