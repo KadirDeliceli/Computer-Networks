@@ -4,13 +4,13 @@ Bu proje, ağ yönlendirme problemini çözmek amacıyla Genetik Algoritma (GA) 
 
 Proje, Tkinter tabanlı grafiksel kullanıcı arayüzü ile desteklenmiş olup dinamik görselleştirme ve asenkron algoritma çalıştırma özellikleri sunmaktadır.
 
------------------------------------------------------------------------------------------------------
-
+----------------------------------------------------------------------------------------------------
 Kullanılan Algoritmalar
 
 Genetik Algoritma (GA)
 
 Q-Learning
+
 -----------------------------------------------------------------------------------------------------
 
 Gereksinimler
@@ -20,6 +20,7 @@ Gerekli Python kütüphaneleri requirements.txt dosyasında listelenmiştir.
 Kurulum için:
 
 pip install -r requirements.txt
+
 -----------------------------------------------------------------------------------------------------
 
 Seed Bilgisi
@@ -28,6 +29,7 @@ Deneylerin tekrarlanabilirliğini sağlamak amacıyla rastgelelik içeren işlem
 
 random.seed(42)
 numpy.random.seed(42)
+
 -----------------------------------------------------------------------------------------------------
 
 Çalıştırma Adımları
@@ -35,14 +37,10 @@ python main.py
 
 -----------------------------------------------------------------------------------------------------
 
-Kullanım
+Kullanım:
 
-Kaynak (S) ve hedef (D) düğümlerini seçiniz
-
-Talep miktarını giriniz
-
-Algoritma ağırlıklarını belirleyiniz
-
-Algoritmayı çalıştırınız
-
-Sonuçları arayüz üzerinden inceleyiniz
+1.Kaynak (S) ve hedef (D) düğümlerini seçiniz
+2.Talep miktarını giriniz
+3.Algoritma ağırlıklarını belirleyiniz
+4.Algoritmayı çalıştırınız
+5.Sonuçları arayüz üzerinden inceleyiniz
