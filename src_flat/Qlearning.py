@@ -2,18 +2,7 @@ import math
 import networkx as nx
 from collections import defaultdict
 from metrics import compute_metrics , total_cost
-
-
-def compute_priority_mode(weights):
-    d = weights["delay"]
-    r = weights["reliability"]
-    s = weights["resource"]
-    if d >= r and d >= s:
-        return 0
-    elif r >= d and r >= s:
-        return 1
-    else:
-        return 2
+import random
 
 
 def Q_Learning_run(G, source, destination, demand, weights):
@@ -26,20 +15,15 @@ def Q_Learning_run(G, source, destination, demand, weights):
     epsilon_decay = 0.995
     epsilon_min = 0.05
 
-    PRIORITY_PENALTY = 1.0
-
-    priority_mode = compute_priority_mode(weights)
-
-
     for u, v, data in G.edges(data=True):
         rel = max(min(data["reliability"], 1.0), 0.01)
-        data["_rel_cost"] = -math.log(rel)
+        data["rel_cost"] = -math.log(rel)
 
     for n, data in G.nodes(data=True):
         rel = max(min(data["reliability"], 1.0), 0.01)
-        data["_rel_cost"] = -math.log(rel)
+        data["rel_cost"] = -math.log(rel)
 
-    source_rel_cost = G.nodes[source]["_rel_cost"]
+    source_rel_cost = G.nodes[source]["rel_cost"]
 
 
     Q = defaultdict(dict)
@@ -84,7 +68,7 @@ def Q_Learning_run(G, source, destination, demand, weights):
         acts = neighbors(n)
         if not acts:
             return None
-        return acts[(episode_idx + step_idx) % len(acts)]
+        return random.choice(acts)
 
     for ep in range(episodes):
         current = source
@@ -96,11 +80,10 @@ def Q_Learning_run(G, source, destination, demand, weights):
             step += 1
             state_key = (current, demand)
 
-            if step <= int(max_steps * epsilon):
+            if random.random() < epsilon:
                 nxt = explore_action(current, ep, step)
             else:
                 nxt = best_action(state_key, current)
-
             if nxt is None:
                 break
 
@@ -109,29 +92,18 @@ def Q_Learning_run(G, source, destination, demand, weights):
 
             delay_cost = edge["delay"]
             if nxt != source and nxt != destination:
-                delay_cost += node["processing_delay"]
+                delay_cost += node["processing_delay"] * 0.1
 
-            reliability_cost = edge["_rel_cost"] + node["_rel_cost"]
+            reliability_cost = edge["rel_cost"] + node["rel_cost"]
             resource_cost = 1000.0 / max(edge["bandwidth"], 1.0)
 
-            cost = (
-                weights["delay"] * delay_cost
-                + weights["reliability"] * reliability_cost
-                + weights["resource"] * resource_cost
-            )
+            cost = weights["delay"] * delay_cost + weights["reliability"] * reliability_cost + weights["resource"] * resource_cost
 
             r = -cost
 
             if not source_rel_added:
                 r -= source_rel_cost
                 source_rel_added = True
-
-            if priority_mode == 0:
-                r -= PRIORITY_PENALTY * delay_cost
-            elif priority_mode == 1:
-                r -= PRIORITY_PENALTY * reliability_cost
-            else:
-                r -= PRIORITY_PENALTY * resource_cost
 
             if edge["bandwidth"] < demand:
                 r -= 2.0
